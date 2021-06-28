@@ -4,16 +4,16 @@ const path = require("path");
 
 const webpack = require("..");
 const Stats = require("../lib/Stats");
-const WebpackOptionsDefaulter = require("../lib/WebpackOptionsDefaulter");
-const MemoryFs = require("memory-fs");
+const { createFsFromVolume, Volume } = require("memfs");
 const captureStdio = require("./helpers/captureStdio");
+const deprecationTracking = require("./helpers/deprecationTracking");
 
 describe("Compiler", () => {
 	jest.setTimeout(20000);
 	function compile(entry, options, callback) {
 		const noOutputPath = !options.output || !options.output.path;
+		options = webpack.config.getNormalizedWebpackOptions(options);
 		if (!options.mode) options.mode = "production";
-		options = new WebpackOptionsDefaulter().process(options);
 		options.entry = entry;
 		options.context = path.join(__dirname, "fixtures");
 		if (noOutputPath) options.output.path = "/";
@@ -165,8 +165,8 @@ describe("Compiler", () => {
 			expect(bundle).not.toMatch("4: function(");
 			expect(bundle).not.toMatch("fixtures");
 			expect(chunk).not.toMatch("fixtures");
-			expect(bundle).toMatch("webpackJsonp");
-			expect(chunk).toMatch('window["webpackJsonp"] || []).push');
+			expect(bundle).toMatch("webpackChunk");
+			expect(chunk).toMatch('self["webpackChunk"] || []).push');
 			done();
 		});
 	});
@@ -197,7 +197,7 @@ describe("Compiler", () => {
 				entry: "./c",
 				context: path.join(__dirname, "fixtures"),
 				output: {
-					path: "/",
+					path: "/directory",
 					pathinfo: true
 				}
 			});
@@ -269,11 +269,11 @@ describe("Compiler", () => {
 			mode: "production",
 			entry: "./missing",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.run((err, stats) => {
 			if (err) return done(err);
 			if (compiler.outputFileSystem.existsSync("/bundle.js"))
@@ -303,7 +303,7 @@ describe("Compiler", () => {
 				mode: "production",
 				entry: "./missing-file",
 				output: {
-					path: "/",
+					path: "/directory",
 					filename: "bundle.js"
 				},
 				bail: true
@@ -322,7 +322,7 @@ describe("Compiler", () => {
 			const createCompiler = options => {
 				return new Promise((resolve, reject) => {
 					const c = webpack(options);
-					c.outputFileSystem = new MemoryFs();
+					c.outputFileSystem = createFsFromVolume(new Volume());
 					const watching = c.watch({}, (err, stats) => {
 						watching.close(() => {
 							if (err) return reject(err);
@@ -336,10 +336,9 @@ describe("Compiler", () => {
 				mode: "production",
 				entry: "./missing-file",
 				output: {
-					path: "/",
+					path: "/directory",
 					filename: "bundle.js"
-				},
-				watch: true
+				}
 			});
 			expect(compiler).toBeInstanceOf(Stats);
 			done();
@@ -354,11 +353,11 @@ describe("Compiler", () => {
 			mode: "production",
 			entry: "./missing",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		const watching = compiler.watch({}, (err, stats) => {
 			watching.close();
 			if (err) return done(err);
@@ -367,17 +366,17 @@ describe("Compiler", () => {
 			done();
 		});
 	});
-	it("should not be run twice at a time (run)", function(done) {
+	it("should not be running twice at a time (run)", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.run((err, stats) => {
 			if (err) return done(err);
 		});
@@ -385,17 +384,17 @@ describe("Compiler", () => {
 			if (err) return done();
 		});
 	});
-	it("should not be run twice at a time (watch)", function(done) {
+	it("should not be running twice at a time (watch)", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.watch({}, (err, stats) => {
 			if (err) return done(err);
 		});
@@ -403,17 +402,17 @@ describe("Compiler", () => {
 			if (err) return done();
 		});
 	});
-	it("should not be run twice at a time (run - watch)", function(done) {
+	it("should not be running twice at a time (run - watch)", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.run((err, stats) => {
 			if (err) return done(err);
 		});
@@ -421,17 +420,17 @@ describe("Compiler", () => {
 			if (err) return done();
 		});
 	});
-	it("should not be run twice at a time (watch - run)", function(done) {
+	it("should not be running twice at a time (watch - run)", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.watch({}, (err, stats) => {
 			if (err) return done(err);
 		});
@@ -439,55 +438,56 @@ describe("Compiler", () => {
 			if (err) return done();
 		});
 	});
-	it("should not be run twice at a time (instance cb)", function(done) {
+	it("should not be running twice at a time (instance cb)", done => {
 		const compiler = webpack(
 			{
 				context: __dirname,
 				mode: "production",
 				entry: "./c",
 				output: {
-					path: "/",
+					path: "/directory",
 					filename: "bundle.js"
 				}
 			},
 			() => {}
 		);
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.run((err, stats) => {
 			if (err) return done();
 		});
 	});
-	it("should run again correctly after first compilation", function(done) {
+	it("should run again correctly after first compilation", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
-		compiler.run((err, stats) => {
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
+		compiler.run((err, stats1) => {
 			if (err) return done(err);
 
-			compiler.run((err, stats) => {
+			compiler.run((err, stats2) => {
 				if (err) return done(err);
+				expect(stats1.toString({ all: true })).toBeTypeOf("string");
 				done();
 			});
 		});
 	});
-	it("should watch again correctly after first compilation", function(done) {
+	it("should watch again correctly after first compilation", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.run((err, stats) => {
 			if (err) return done(err);
 
@@ -497,17 +497,17 @@ describe("Compiler", () => {
 			});
 		});
 	});
-	it("should run again correctly after first closed watch", function(done) {
+	it("should run again correctly after first closed watch", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		const watching = compiler.watch({}, (err, stats) => {
 			if (err) return done(err);
 		});
@@ -518,17 +518,34 @@ describe("Compiler", () => {
 			});
 		});
 	});
-	it("should watch again correctly after first closed watch", function(done) {
+	it("should set compiler.watching correctly", function (done) {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
+		const watching = compiler.watch({}, (err, stats) => {
+			if (err) return done(err);
+			done();
+		});
+		expect(compiler.watching).toBe(watching);
+	});
+	it("should watch again correctly after first closed watch", done => {
+		const compiler = webpack({
+			context: __dirname,
+			mode: "production",
+			entry: "./c",
+			output: {
+				path: "/directory",
+				filename: "bundle.js"
+			}
+		});
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		const watching = compiler.watch({}, (err, stats) => {
 			if (err) return done(err);
 		});
@@ -539,17 +556,17 @@ describe("Compiler", () => {
 			});
 		});
 	});
-	it("should run again correctly inside afterDone hook", function(done) {
+	it("should run again correctly inside afterDone hook", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		let once = true;
 		compiler.hooks.afterDone.tap("RunAgainTest", () => {
 			if (!once) return;
@@ -563,17 +580,17 @@ describe("Compiler", () => {
 			if (err) return done(err);
 		});
 	});
-	it("should call afterDone hook after other callbacks (run)", function(done) {
+	it("should call afterDone hook after other callbacks (run)", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		const runCb = jest.fn();
 		const doneHookCb = jest.fn();
 		compiler.hooks.done.tap("afterDoneRunTest", doneHookCb);
@@ -587,7 +604,7 @@ describe("Compiler", () => {
 			runCb();
 		});
 	});
-	it("should call afterDone hook after other callbacks (instance cb)", function(done) {
+	it("should call afterDone hook after other callbacks (instance cb)", done => {
 		const instanceCb = jest.fn();
 		const compiler = webpack(
 			{
@@ -595,7 +612,7 @@ describe("Compiler", () => {
 				mode: "production",
 				entry: "./c",
 				output: {
-					path: "/",
+					path: "/directory",
 					filename: "bundle.js"
 				}
 			},
@@ -604,7 +621,7 @@ describe("Compiler", () => {
 				instanceCb();
 			}
 		);
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		const doneHookCb = jest.fn();
 		compiler.hooks.done.tap("afterDoneRunTest", doneHookCb);
 		compiler.hooks.afterDone.tap("afterDoneRunTest", () => {
@@ -613,22 +630,25 @@ describe("Compiler", () => {
 			done();
 		});
 	});
-	it("should call afterDone hook after other callbacks (watch)", function(done) {
+	it("should call afterDone hook after other callbacks (watch)", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
+		const invalidHookCb = jest.fn();
 		const doneHookCb = jest.fn();
 		const watchCb = jest.fn();
 		const invalidateCb = jest.fn();
+		compiler.hooks.invalid.tap("afterDoneWatchTest", invalidHookCb);
 		compiler.hooks.done.tap("afterDoneWatchTest", doneHookCb);
 		compiler.hooks.afterDone.tap("afterDoneWatchTest", () => {
+			expect(invalidHookCb).toHaveBeenCalled();
 			expect(doneHookCb).toHaveBeenCalled();
 			expect(watchCb).toHaveBeenCalled();
 			expect(invalidateCb).toHaveBeenCalled();
@@ -638,24 +658,29 @@ describe("Compiler", () => {
 			if (err) return done(err);
 			watchCb();
 		});
-		watch.invalidate(invalidateCb);
+		process.nextTick(() => {
+			watch.invalidate(invalidateCb);
+		});
 	});
-	it("should call afterDone hook after other callbacks (watch close)", function(done) {
+	it("should call afterDone hook after other callbacks (watch close)", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
+		const invalidHookCb = jest.fn();
 		const watchCloseCb = jest.fn();
 		const watchCloseHookCb = jest.fn();
 		const invalidateCb = jest.fn();
+		compiler.hooks.invalid.tap("afterDoneWatchTest", invalidHookCb);
 		compiler.hooks.watchClose.tap("afterDoneWatchTest", watchCloseHookCb);
 		compiler.hooks.afterDone.tap("afterDoneWatchTest", () => {
+			expect(invalidHookCb).toHaveBeenCalled();
 			expect(watchCloseCb).toHaveBeenCalled();
 			expect(watchCloseHookCb).toHaveBeenCalled();
 			expect(invalidateCb).toHaveBeenCalled();
@@ -665,20 +690,22 @@ describe("Compiler", () => {
 			if (err) return done(err);
 			watch.close(watchCloseCb);
 		});
-		watch.invalidate(invalidateCb);
+		process.nextTick(() => {
+			watch.invalidate(invalidateCb);
+		});
 	});
-	it("should flag watchMode as true in watch", function(done) {
+	it("should flag watchMode as true in watch", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "production",
 			entry: "./c",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
 
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 
 		const watch = compiler.watch({}, err => {
 			if (err) return done(err);
@@ -689,21 +716,21 @@ describe("Compiler", () => {
 			});
 		});
 	});
-	it("should use cache on second run call", function(done) {
+	it("should use cache on second run call", done => {
 		const compiler = webpack({
 			context: __dirname,
 			mode: "development",
 			devtool: false,
 			entry: "./fixtures/count-loader!./fixtures/count-loader",
 			output: {
-				path: "/"
+				path: "/directory"
 			}
 		});
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.run(() => {
 			compiler.run(() => {
 				const result = compiler.outputFileSystem.readFileSync(
-					"/main.js",
+					"/directory/main.js",
 					"utf-8"
 				);
 				expect(result).toContain("module.exports = 0;");
@@ -719,18 +746,30 @@ describe("Compiler", () => {
 			mode: "production",
 			entry: "./missing",
 			output: {
-				path: "/",
+				path: "/directory",
 				filename: "bundle.js"
 			}
 		});
 		compiler.hooks.failed.tap("CompilerTest", failedSpy);
-		compiler.outputFileSystem = new MemoryFs();
+		compiler.outputFileSystem = createFsFromVolume(new Volume());
 		compiler.run((err, stats) => {
 			expect(err).toBeTruthy();
 			expect(failedSpy).toHaveBeenCalledTimes(1);
 			expect(failedSpy).toHaveBeenCalledWith(err);
 			done();
 		});
+	});
+	it("should deprecate when watch option is used without callback", () => {
+		const tracker = deprecationTracking.start();
+		webpack({
+			watch: true
+		});
+		const deprecations = tracker();
+		expect(deprecations).toEqual([
+			expect.objectContaining({
+				code: "DEP_WEBPACK_WATCH_WITHOUT_CALLBACK"
+			})
+		]);
 	});
 	describe("infrastructure logging", () => {
 		let capture;
@@ -740,6 +779,12 @@ describe("Compiler", () => {
 		afterEach(() => {
 			capture.restore();
 		});
+		const escapeAnsi = stringRaw =>
+			stringRaw
+				.replace(/\u001b\[1m\u001b\[([0-9;]*)m/g, "<CLR=$1,BOLD>")
+				.replace(/\u001b\[1m/g, "<CLR=BOLD>")
+				.replace(/\u001b\[39m\u001b\[22m/g, "</CLR>")
+				.replace(/\u001b\[([0-9;]*)m/g, "<CLR=$1>");
 		class MyPlugin {
 			apply(compiler) {
 				const logger = compiler.getInfrastructureLogger("MyPlugin");
@@ -750,7 +795,7 @@ describe("Compiler", () => {
 				logger.info("Info");
 				logger.log("Log");
 				logger.debug("Debug");
-				logger.groupCollapsed("Collaped group");
+				logger.groupCollapsed("Collapsed group");
 				logger.log("Log inside collapsed group");
 				logger.groupEnd();
 				logger.groupEnd();
@@ -762,7 +807,7 @@ describe("Compiler", () => {
 				context: path.join(__dirname, "fixtures"),
 				entry: "./a",
 				output: {
-					path: "/",
+					path: "/directory",
 					filename: "bundle.js"
 				},
 				infrastructureLogging: {
@@ -770,18 +815,18 @@ describe("Compiler", () => {
 				},
 				plugins: [new MyPlugin()]
 			});
-			compiler.outputFileSystem = new MemoryFs();
+			compiler.outputFileSystem = createFsFromVolume(new Volume());
 			compiler.run((err, stats) => {
-				expect(capture.toString().replace(/[\d.]+ms/, "Xms"))
+				expect(capture.toString().replace(/[\d.]+ ms/, "X ms"))
 					.toMatchInlineSnapshot(`
 "<-> [MyPlugin] Group
   <e> [MyPlugin] Error
   <w> [MyPlugin] Warning
   <i> [MyPlugin] Info
       [MyPlugin] Log
-  <-> [MyPlugin] Collaped group
+  <-> [MyPlugin] Collapsed group
         [MyPlugin] Log inside collapsed group
-<t> [MyPlugin] Time: Xms
+<t> [MyPlugin] Time: X ms
 "
 `);
 				done();
@@ -792,7 +837,7 @@ describe("Compiler", () => {
 				context: path.join(__dirname, "fixtures"),
 				entry: "./a",
 				output: {
-					path: "/",
+					path: "/directory",
 					filename: "bundle.js"
 				},
 				infrastructureLogging: {
@@ -801,9 +846,9 @@ describe("Compiler", () => {
 				},
 				plugins: [new MyPlugin()]
 			});
-			compiler.outputFileSystem = new MemoryFs();
+			compiler.outputFileSystem = createFsFromVolume(new Volume());
 			compiler.run((err, stats) => {
-				expect(capture.toString().replace(/[\d.]+ms/, "Xms"))
+				expect(capture.toString().replace(/[\d.]+ ms/, "X ms"))
 					.toMatchInlineSnapshot(`
 "<-> [MyPlugin] Group
   <e> [MyPlugin] Error
@@ -811,9 +856,9 @@ describe("Compiler", () => {
   <i> [MyPlugin] Info
       [MyPlugin] Log
       [MyPlugin] Debug
-  <-> [MyPlugin] Collaped group
+  <-> [MyPlugin] Collapsed group
         [MyPlugin] Log inside collapsed group
-<t> [MyPlugin] Time: Xms
+<t> [MyPlugin] Time: X ms
 "
 `);
 				done();
@@ -824,7 +869,7 @@ describe("Compiler", () => {
 				context: path.join(__dirname, "fixtures"),
 				entry: "./a",
 				output: {
-					path: "/",
+					path: "/directory",
 					filename: "bundle.js"
 				},
 				infrastructureLogging: {
@@ -832,9 +877,73 @@ describe("Compiler", () => {
 				},
 				plugins: [new MyPlugin()]
 			});
-			compiler.outputFileSystem = new MemoryFs();
+			compiler.outputFileSystem = createFsFromVolume(new Volume());
 			compiler.run((err, stats) => {
 				expect(capture.toString()).toMatchInlineSnapshot(`""`);
+				done();
+			});
+		});
+		it("should log to the console with colors (verbose)", done => {
+			const compiler = webpack({
+				context: path.join(__dirname, "fixtures"),
+				entry: "./a",
+				output: {
+					path: "/directory",
+					filename: "bundle.js"
+				},
+				infrastructureLogging: {
+					level: "verbose",
+					colors: true
+				},
+				plugins: [new MyPlugin()]
+			});
+			compiler.outputFileSystem = createFsFromVolume(new Volume());
+			compiler.run((err, stats) => {
+				expect(escapeAnsi(capture.toStringRaw()).replace(/[\d.]+ ms/, "X ms"))
+					.toMatchInlineSnapshot(`
+"<-> <CLR=36,BOLD>[MyPlugin] Group</CLR>
+  <e> <CLR=31,BOLD>[MyPlugin] Error</CLR>
+  <w> <CLR=33,BOLD>[MyPlugin] Warning</CLR>
+  <i> <CLR=32,BOLD>[MyPlugin] Info</CLR>
+      <CLR=BOLD>[MyPlugin] Log<CLR=22>
+  <-> <CLR=36,BOLD>[MyPlugin] Collapsed group</CLR>
+        <CLR=BOLD>[MyPlugin] Log inside collapsed group<CLR=22>
+<t> <CLR=35,BOLD>[MyPlugin] Time: X ms</CLR>
+"
+`);
+				done();
+			});
+		});
+		it("should log to the console with colors (debug mode)", done => {
+			const compiler = webpack({
+				context: path.join(__dirname, "fixtures"),
+				entry: "./a",
+				output: {
+					path: "/directory",
+					filename: "bundle.js"
+				},
+				infrastructureLogging: {
+					level: "error",
+					debug: /MyPlugin/,
+					colors: true
+				},
+				plugins: [new MyPlugin()]
+			});
+			compiler.outputFileSystem = createFsFromVolume(new Volume());
+			compiler.run((err, stats) => {
+				expect(escapeAnsi(capture.toStringRaw()).replace(/[\d.]+ ms/, "X ms"))
+					.toMatchInlineSnapshot(`
+"<-> <CLR=36,BOLD>[MyPlugin] Group</CLR>
+  <e> <CLR=31,BOLD>[MyPlugin] Error</CLR>
+  <w> <CLR=33,BOLD>[MyPlugin] Warning</CLR>
+  <i> <CLR=32,BOLD>[MyPlugin] Info</CLR>
+      <CLR=BOLD>[MyPlugin] Log<CLR=22>
+      [MyPlugin] Debug
+  <-> <CLR=36,BOLD>[MyPlugin] Collapsed group</CLR>
+        <CLR=BOLD>[MyPlugin] Log inside collapsed group<CLR=22>
+<t> <CLR=35,BOLD>[MyPlugin] Time: X ms</CLR>
+"
+`);
 				done();
 			});
 		});

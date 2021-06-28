@@ -6,6 +6,11 @@ describe("TestCases", () => {
 		name: "cache pack",
 		cache: {
 			type: "filesystem",
+			buildDependencies: {
+				defaultWebpack: []
+			}
+		},
+		snapshot: {
 			managedPaths: [path.resolve(__dirname, "../node_modules")]
 		},
 		optimization: {

@@ -1,14 +1,12 @@
+/** @type {import("../../../../").Configuration} */
 module.exports = {
 	mode: "development",
 	module: {
 		rules: [
 			{
-				test: /\.opus$/,
+				test: /\.opuuus$/,
 				type: "asset"
 			}
 		]
-	},
-	experiments: {
-		asset: true
 	}
 };

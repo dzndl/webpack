@@ -7,6 +7,9 @@ const rimraf = require("rimraf");
 const checkArrayExpectation = require("./checkArrayExpectation");
 const createLazyTestEnv = require("./helpers/createLazyTestEnv");
 const { remove } = require("./helpers/remove");
+const prepareOptions = require("./helpers/prepareOptions");
+const deprecationTracking = require("./helpers/deprecationTracking");
+const FakeDocument = require("./helpers/FakeDocument");
 
 const webpack = require("..");
 
@@ -112,9 +115,16 @@ describe("WatchTestCases", () => {
 								testName
 							);
 
+							rimraf.sync(outputDirectory);
+
 							let options = {};
 							const configPath = path.join(testDirectory, "webpack.config.js");
-							if (fs.existsSync(configPath)) options = require(configPath);
+							if (fs.existsSync(configPath)) {
+								options = prepareOptions(require(configPath), {
+									testPath: outputDirectory,
+									srcPath: tempDirectory
+								});
+							}
 							const applyConfig = options => {
 								if (!options.mode) options.mode = "development";
 								if (!options.context) options.context = tempDirectory;
@@ -145,6 +155,7 @@ describe("WatchTestCases", () => {
 							copyDiff(path.join(testDirectory, run.name), tempDirectory, true);
 
 							setTimeout(() => {
+								const deprecationTracker = deprecationTracking.start();
 								const compiler = webpack(options);
 								compiler.hooks.invalid.tap(
 									"WatchTestCasesTest",
@@ -158,10 +169,11 @@ describe("WatchTestCases", () => {
 									},
 									(err, stats) => {
 										if (err) return compilationFinished(err);
-										if (!stats)
+										if (!stats) {
 											return compilationFinished(
 												new Error("No stats reported from Compiler")
 											);
+										}
 										if (stats.hash === lastHash) return;
 										lastHash = stats.hash;
 										if (run.done && lastHash !== stats.hash) {
@@ -181,14 +193,21 @@ describe("WatchTestCases", () => {
 										}
 										if (waitMode) return;
 										run.done = true;
+										run.stats = stats;
 										if (err) return compilationFinished(err);
 										const statOptions = {
 											preset: "verbose",
+											cached: true,
+											cachedAssets: true,
+											cachedModules: true,
 											colors: false
 										};
 										fs.mkdirSync(outputDirectory, { recursive: true });
 										fs.writeFileSync(
-											path.join(outputDirectory, "stats.txt"),
+											path.join(
+												outputDirectory,
+												`stats.${runs[runIdx] && runs[runIdx].name}.txt`
+											),
 											stats.toString(statOptions),
 											"utf-8"
 										);
@@ -218,7 +237,10 @@ describe("WatchTestCases", () => {
 
 										const globalContext = {
 											console: console,
-											expect: expect
+											expect: expect,
+											setTimeout,
+											clearTimeout,
+											document: new FakeDocument()
 										};
 
 										function _require(currentDirectory, module) {
@@ -243,7 +265,7 @@ describe("WatchTestCases", () => {
 													options.target === "webworker"
 												) {
 													fn = vm.runInNewContext(
-														"(function(require, module, exports, __dirname, __filename, it, WATCH_STEP, STATS_JSON, STATE, expect, window) {" +
+														"(function(require, module, exports, __dirname, __filename, it, WATCH_STEP, STATS_JSON, STATE, expect, window, self) {" +
 															'function nsObj(m) { Object.defineProperty(m, Symbol.toStringTag, { value: "Module" }); return m; }' +
 															content +
 															"\n})",
@@ -275,6 +297,7 @@ describe("WatchTestCases", () => {
 													jsonStats,
 													state,
 													expect,
+													globalContext,
 													globalContext
 												);
 												return module.exports;
@@ -283,7 +306,7 @@ describe("WatchTestCases", () => {
 												module in testConfig.modules
 											) {
 												return testConfig.modules[module];
-											} else return require.requireActual(module);
+											} else return jest.requireActual(module);
 										}
 
 										let testConfig = {};
@@ -309,27 +332,42 @@ describe("WatchTestCases", () => {
 												new Error("No tests exported by test case")
 											);
 
-										run.it("should compile the next step", done => {
-											runIdx++;
-											if (runIdx < runs.length) {
-												run = runs[runIdx];
-												waitMode = true;
-												setTimeout(() => {
-													waitMode = false;
-													compilationFinished = done;
-													currentWatchStepModule.step = run.name;
-													copyDiff(
-														path.join(testDirectory, run.name),
-														tempDirectory,
-														false
-													);
-												}, 1500);
-											} else {
-												watching.close();
-
-												done();
-											}
-										});
+										run.it(
+											"should compile the next step",
+											done => {
+												runIdx++;
+												if (runIdx < runs.length) {
+													run = runs[runIdx];
+													waitMode = true;
+													setTimeout(() => {
+														waitMode = false;
+														compilationFinished = done;
+														currentWatchStepModule.step = run.name;
+														copyDiff(
+															path.join(testDirectory, run.name),
+															tempDirectory,
+															false
+														);
+													}, 1500);
+												} else {
+													const deprecations = deprecationTracker();
+													if (
+														checkArrayExpectation(
+															testDirectory,
+															{ deprecations },
+															"deprecation",
+															"Deprecation",
+															done
+														)
+													) {
+														watching.close();
+														return;
+													}
+													watching.close(done);
+												}
+											},
+											45000
+										);
 
 										compilationFinished();
 									}
@@ -347,6 +385,10 @@ describe("WatchTestCases", () => {
 						);
 						run.it = _it;
 						run.getNumberOfTests = getNumberOfTests;
+						it(`${run.name} should allow to read stats`, done => {
+							if (run.stats) run.stats.toString({ all: true });
+							done();
+						});
 					}
 
 					afterAll(() => {

@@ -6,17 +6,10 @@ module.exports = (stdio, tty) => {
 	const write = stdio.write;
 	const isTTY = stdio.isTTY;
 
-	stdio.write = function(str) {
+	stdio.write = function (str) {
 		logs.push(str);
 	};
 	if (tty !== undefined) stdio.isTTY = tty;
-
-	// isTTY flag is only read once on initialization
-	// therefore we need to clear some module caches
-	// to get the mocked value
-	delete require.cache[require.resolve("../../")];
-	delete require.cache[require.resolve("../../lib/node/NodeEnvironmentPlugin")];
-	delete require.cache[require.resolve("../../lib/node/nodeConsole")];
 
 	return {
 		data: logs,
@@ -25,7 +18,7 @@ module.exports = (stdio, tty) => {
 
 		toString: () => {
 			return stripAnsi(logs.join("")).replace(
-				/\([^)]+\) (\[[^\]]+\]\s*)?DeprecationWarning.+(\n\s+at .*)*\n?/g,
+				/\([^)]+\) (\[[^\]]+\]\s*)?DeprecationWarning.+(\n\(Use .node.+\))?(\n(\s|BREAKING CHANGE).*)*(\n\s+at .*)*\n?/g,
 				""
 			);
 		},

@@ -4,16 +4,15 @@ const path = require("path");
 const fs = require("graceful-fs");
 const vm = require("vm");
 const rimraf = require("rimraf");
+const webpack = require("..");
 const TerserPlugin = require("terser-webpack-plugin");
 const checkArrayExpectation = require("./checkArrayExpectation");
 const createLazyTestEnv = require("./helpers/createLazyTestEnv");
-
-const webpack = require("..");
+const deprecationTracking = require("./helpers/deprecationTracking");
+const captureStdio = require("./helpers/captureStdio");
 
 const terserForTesting = new TerserPlugin({
-	cache: false,
-	parallel: false,
-	sourceMap: true
+	parallel: false
 });
 
 const DEFAULT_OPTIMIZATIONS = {
@@ -25,7 +24,7 @@ const DEFAULT_OPTIMIZATIONS = {
 	providedExports: true,
 	usedExports: true,
 	mangleExports: true,
-	noEmitOnErrors: false,
+	emitOnErrors: true,
 	concatenateModules: false,
 	moduleIds: "size",
 	chunkIds: "size",
@@ -33,7 +32,7 @@ const DEFAULT_OPTIMIZATIONS = {
 };
 
 const NO_EMIT_ON_ERRORS_OPTIMIZATIONS = {
-	noEmitOnErrors: false,
+	emitOnErrors: true,
 	minimizer: [terserForTesting]
 };
 
@@ -50,8 +49,15 @@ categories = categories.map(cat => {
 
 const describeCases = config => {
 	describe(config.name, () => {
+		let stderr;
+		beforeEach(() => {
+			stderr = captureStdio(process.stderr, true);
+		});
+		afterEach(() => {
+			stderr.restore();
+		});
 		categories.forEach(category => {
-			describe(category.name, function() {
+			describe(category.name, function () {
 				jest.setTimeout(20000);
 
 				category.tests
@@ -89,12 +95,15 @@ const describeCases = config => {
 							);
 							const options = {
 								context: casesPath,
-								entry: "./" + category.name + "/" + testName + "/index",
+								entry: "./" + category.name + "/" + testName + "/",
 								target: "async-node",
 								devtool: config.devtool,
 								mode: config.mode || "none",
 								optimization: config.mode
-									? NO_EMIT_ON_ERRORS_OPTIMIZATIONS
+									? {
+											...NO_EMIT_ON_ERRORS_OPTIMIZATIONS,
+											...config.optimization
+									  }
 									: {
 											...DEFAULT_OPTIMIZATIONS,
 											...config.optimization
@@ -126,7 +135,7 @@ const describeCases = config => {
 										"main"
 									],
 									aliasFields: ["browser"],
-									extensions: [".mjs", ".webpack.js", ".web.js", ".js", ".json"]
+									extensions: [".webpack.js", ".web.js", ".js", ".json"]
 								},
 								resolveLoader: {
 									modules: [
@@ -160,7 +169,7 @@ const describeCases = config => {
 										}
 									]
 								},
-								plugins: (config.plugins || []).concat(function() {
+								plugins: (config.plugins || []).concat(function () {
 									this.hooks.compilation.tap("TestCasesTest", compilation => {
 										[
 											"optimize",
@@ -176,11 +185,8 @@ const describeCases = config => {
 									});
 								}),
 								experiments: {
-									mjs: true,
 									asyncWebAssembly: true,
-									topLevelAwait: true,
-									importAwait: true,
-									importAsync: true
+									topLevelAwait: true
 								}
 							};
 							beforeAll(done => {
@@ -193,7 +199,9 @@ const describeCases = config => {
 										options.output.path,
 										"cache1"
 									);
+									const deprecationTracker = deprecationTracking.start();
 									webpack(options, err => {
+										deprecationTracker();
 										options.output.path = oldPath;
 										if (err) return done(err);
 										done();
@@ -205,7 +213,9 @@ const describeCases = config => {
 										options.output.path,
 										"cache2"
 									);
+									const deprecationTracker = deprecationTracking.start();
 									webpack(options, err => {
+										deprecationTracker();
 										options.output.path = oldPath;
 										if (err) return done(err);
 										done();
@@ -217,13 +227,16 @@ const describeCases = config => {
 								done => {
 									const compiler = webpack(options);
 									const run = () => {
+										const deprecationTracker = deprecationTracking.start();
 										compiler.run((err, stats) => {
+											const deprecations = deprecationTracker();
 											if (err) return done(err);
 											compiler.close(err => {
 												if (err) return done(err);
 												const statOptions = {
 													preset: "verbose",
-													colors: false
+													colors: false,
+													modules: true
 												};
 												fs.mkdirSync(outputDirectory, { recursive: true });
 												fs.writeFileSync(
@@ -232,7 +245,10 @@ const describeCases = config => {
 													"utf-8"
 												);
 												const jsonStats = stats.toJson({
-													errorDetails: true
+													errorDetails: true,
+													modules: false,
+													assets: false,
+													chunks: false
 												});
 												if (
 													checkArrayExpectation(
@@ -242,8 +258,9 @@ const describeCases = config => {
 														"Error",
 														done
 													)
-												)
+												) {
 													return;
+												}
 												if (
 													checkArrayExpectation(
 														testDirectory,
@@ -252,8 +269,20 @@ const describeCases = config => {
 														"Warning",
 														done
 													)
-												)
+												) {
 													return;
+												}
+												const infrastructureLogging = stderr.toString();
+												if (infrastructureLogging) {
+													done(
+														new Error(
+															"Errors/Warnings during build:\n" +
+																infrastructureLogging
+														)
+													);
+												}
+
+												expect(deprecations).toEqual(config.deprecations || []);
 
 												Promise.resolve().then(done);
 											});
@@ -261,7 +290,9 @@ const describeCases = config => {
 									};
 									if (config.cache) {
 										// pre-compile to fill memory cache
+										const deprecationTracker = deprecationTracking.start();
 										compiler.run(err => {
+											deprecationTracker();
 											if (err) return done(err);
 											run();
 										});
@@ -269,7 +300,7 @@ const describeCases = config => {
 										run();
 									}
 								},
-								config.cache ? 10000 : 60000
+								config.cache ? 20000 : 60000
 							);
 
 							it(
@@ -279,7 +310,7 @@ const describeCases = config => {
 										if (module.substr(0, 2) === "./") {
 											const p = path.join(outputDirectory, module);
 											const fn = vm.runInThisContext(
-												"(function(require, module, exports, __dirname, it, expect) {" +
+												"(function(require, module, exports, __dirname, __filename, it, expect) {" +
 													"global.expect = expect;" +
 													'function nsObj(m) { Object.defineProperty(m, Symbol.toStringTag, { value: "Module" }); return m; }' +
 													fs.readFileSync(p, "utf-8") +
@@ -296,6 +327,7 @@ const describeCases = config => {
 												m,
 												m.exports,
 												outputDirectory,
+												p,
 												_it,
 												expect
 											);
@@ -322,4 +354,4 @@ const describeCases = config => {
 	});
 };
 
-module.exports.describeCases = describeCases;
+exports.describeCases = describeCases;

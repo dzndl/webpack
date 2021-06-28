@@ -1,9 +1,12 @@
-const NodeTemplatePlugin = require("../../../../lib/node/NodeTemplatePlugin");
-const SingleEntryPlugin = require("../../../../lib/SingleEntryPlugin");
+const {
+	SingleEntryPlugin,
+	node: { NodeTemplatePlugin }
+} = require("../../../..");
 
 const compilerCache = new WeakMap();
 
-module.exports = function(source) {
+/** @type {import("../../../../").LoaderDefinition} */
+module.exports = function (source) {
 	let childCompiler = compilerCache.get(this._compiler);
 	if (childCompiler === undefined) {
 		childCompiler = this._compilation.createChildCompiler(

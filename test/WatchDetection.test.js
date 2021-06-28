@@ -2,7 +2,7 @@
 
 const path = require("path");
 const fs = require("graceful-fs");
-const MemoryFs = require("memory-fs");
+const { createFsFromVolume, Volume } = require("memfs");
 
 const webpack = require("..");
 
@@ -14,6 +14,9 @@ describe("WatchDetection", () => {
 
 	jest.setTimeout(10000);
 
+	createTestCase(100, true);
+	createTestCase(10, true);
+	createTestCase(600, true);
 	for (let changeTimeout = 10; changeTimeout < 100; changeTimeout += 10) {
 		createTestCase(changeTimeout);
 	}
@@ -21,8 +24,10 @@ describe("WatchDetection", () => {
 		createTestCase(changeTimeout);
 	}
 
-	function createTestCase(changeTimeout) {
-		describe(`time between changes ${changeTimeout}ms`, () => {
+	function createTestCase(changeTimeout, invalidate) {
+		describe(`time between changes ${changeTimeout}ms${
+			invalidate ? " with invalidate call" : ""
+		}`, () => {
 			const fixturePath = path.join(
 				__dirname,
 				"fixtures",
@@ -68,11 +73,13 @@ describe("WatchDetection", () => {
 					mode: "development",
 					entry: loaderPath + "!" + filePath,
 					output: {
-						path: "/",
+						path: "/directory",
 						filename: "bundle.js"
 					}
 				});
-				const memfs = (compiler.outputFileSystem = new MemoryFs());
+				const memfs = (compiler.outputFileSystem = createFsFromVolume(
+					new Volume()
+				));
 				let onChange;
 				compiler.hooks.done.tap("WatchDetectionTest", () => {
 					if (onChange) onChange();
@@ -85,9 +92,9 @@ describe("WatchDetection", () => {
 				function step1() {
 					onChange = () => {
 						if (
-							memfs.readFileSync("/bundle.js") &&
+							memfs.readFileSync("/directory/bundle.js") &&
 							memfs
-								.readFileSync("/bundle.js")
+								.readFileSync("/directory/bundle.js")
 								.toString()
 								.indexOf("original") >= 0
 						)
@@ -103,7 +110,10 @@ describe("WatchDetection", () => {
 				}
 
 				function step2() {
-					onChange = null;
+					onChange = () => {
+						expect(compiler.modifiedFiles).not.toBe(undefined);
+						expect(compiler.removedFiles).not.toBe(undefined);
+					};
 
 					fs.writeFile(
 						filePath,
@@ -116,8 +126,7 @@ describe("WatchDetection", () => {
 				}
 
 				function step3() {
-					onChange = null;
-
+					if (invalidate) watcher.invalidate();
 					fs.writeFile(file2Path, "wrong", "utf-8", handleError);
 
 					setTimeout(step4, changeTimeout);
@@ -125,9 +134,11 @@ describe("WatchDetection", () => {
 
 				function step4() {
 					onChange = () => {
+						expect(compiler.modifiedFiles).not.toBe(undefined);
+						expect(compiler.removedFiles).not.toBe(undefined);
 						if (
 							memfs
-								.readFileSync("/bundle.js")
+								.readFileSync("/directory/bundle.js")
 								.toString()
 								.indexOf("correct") >= 0
 						)
